@@ -11,9 +11,14 @@ class Settings(BaseSettings):
     upload_dir: str
 
     google_api_key: str = ""
-    database_url: str = ""
+    database_url: str
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore",)
+    gemini_chat_model: str
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+    )
 
 
 settings = Settings()

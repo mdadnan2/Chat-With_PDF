@@ -5,8 +5,11 @@ from uuid import uuid4
 from fastapi import HTTPException, UploadFile, status
 
 from app.config import settings
+from app.database.models import Chunk, Document
+from app.database.session import SessionLocal
 from app.schemas.upload_schema import UploadMetadata
 from app.services.chunking_service import ChunkingService
+from app.services.embedding_service import EmbeddingService
 from app.services.parser_service import ParserService
 
 
@@ -24,6 +27,7 @@ class UploadService:
 
         self.parser = ParserService()
         self.chunking = ChunkingService()
+        self.embedding = EmbeddingService()
 
     def validate_file(self, file: UploadFile) -> str:
         extension = Path(file.filename).suffix.lower()
@@ -58,22 +62,49 @@ class UploadService:
 
         file_path = await self.save_file(file, stored_name)
 
-        # Parse document into Markdown
+        # Parse document
         markdown = self.parser.parse_document(file_path)
 
-        # Convert Markdown into chunks
+        # Chunk document
         chunks = self.chunking.chunk_document(markdown)
 
-        print("\n" + "=" * 60)
-        print(f"Total Chunks: {len(chunks)}")
-        print("=" * 60)
+        db = SessionLocal()
 
-        for index, chunk in enumerate(chunks, start=1):
-            print(f"\nChunk #{index}")
-            print(f"Heading : {chunk.heading}")
-            print(f"Level   : {chunk.level}")
-            print(f"Content :\n{chunk.content}")
-            print("-" * 60)
+        try:
+            # Save document
+            document = Document(
+                original_filename=file.filename,
+                stored_filename=stored_name,
+            )
+
+            db.add(document)
+            db.flush()
+
+            # Save chunks
+            for index, chunk in enumerate(chunks):
+                if not chunk.content.strip():
+                    continue
+
+                embedding = self.embedding.generate_embedding(chunk.content)
+
+                db_chunk = Chunk(
+                    document_id=document.id,
+                    heading=chunk.heading,
+                    chunk_index=index,
+                    content=chunk.content,
+                    embedding=embedding,
+                )
+
+                db.add(db_chunk)
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+        finally:
+            db.close()
 
         return UploadMetadata(
             id=file_id,
