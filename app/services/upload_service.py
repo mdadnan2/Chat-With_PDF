@@ -1,11 +1,13 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+
 from fastapi import HTTPException, UploadFile, status
-from app.services.parser_service import ParserService
 
 from app.config import settings
 from app.schemas.upload_schema import UploadMetadata
+from app.services.chunking_service import ChunkingService
+from app.services.parser_service import ParserService
 
 
 class UploadService:
@@ -21,6 +23,7 @@ class UploadService:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
 
         self.parser = ParserService()
+        self.chunking = ChunkingService()
 
     def validate_file(self, file: UploadFile) -> str:
         extension = Path(file.filename).suffix.lower()
@@ -55,9 +58,22 @@ class UploadService:
 
         file_path = await self.save_file(file, stored_name)
 
+        # Parse document into Markdown
         markdown = self.parser.parse_document(file_path)
-        
-        print(markdown)
+
+        # Convert Markdown into chunks
+        chunks = self.chunking.chunk_document(markdown)
+
+        print("\n" + "=" * 60)
+        print(f"Total Chunks: {len(chunks)}")
+        print("=" * 60)
+
+        for index, chunk in enumerate(chunks, start=1):
+            print(f"\nChunk #{index}")
+            print(f"Heading : {chunk.heading}")
+            print(f"Level   : {chunk.level}")
+            print(f"Content :\n{chunk.content}")
+            print("-" * 60)
 
         return UploadMetadata(
             id=file_id,
@@ -66,5 +82,5 @@ class UploadService:
             content_type=file.content_type,
             extension=extension,
             size=file.size,
-            uploaded_at=datetime.now(),
+            uploaded_at=datetime.now(tz=timezone.utc),
         )
